@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: features
+      POSTGRES_USER: stampede
+      POSTGRES_PASSWORD: stampede
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stampede -d features"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    image: golang:1.22
+    working_dir: /app
+    command: sh -c "go mod download && go run ./cmd/server"
+    environment:
+      DATABASE_URL: postgres://stampede:stampede@postgres:5432/features?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      PORT: "8080"
+    volumes:
+      - ./backend:/app
+      - go-build-cache:/root/.cache/go-build
+      - go-mod-cache:/go/pkg/mod
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+volumes:
+  postgres-data:
+  go-build-cache:
+  go-mod-cache:
+  frontend-node-modules:

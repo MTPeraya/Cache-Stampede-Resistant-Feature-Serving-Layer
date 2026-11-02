@@ -1,0 +1,8 @@
+{
+  "name": "stampede-shield-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vue-tsc -b && vite build" },
+  "dependencies": { "pinia": "^2.1.7", "uplot": "^1.6.30", "vue": "^3.4.27" },
+  "devDependencies": { "@vitejs/plugin-vue": "^5.0.5", "typescript": "^5.4.5", "vite": "^5.2.11", "vue-tsc": "^2.0.21" }
+}

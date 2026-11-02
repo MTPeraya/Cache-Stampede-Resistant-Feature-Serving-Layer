@@ -11,6 +11,7 @@ import (
 
 	"github.com/MTPeraya/stampede-shield/backend/internal/api"
 	"github.com/MTPeraya/stampede-shield/backend/internal/cache"
+	"github.com/MTPeraya/stampede-shield/backend/internal/chaos"
 	"github.com/MTPeraya/stampede-shield/backend/internal/features"
 	"github.com/MTPeraya/stampede-shield/backend/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,8 +52,10 @@ func main() {
 
 	store := features.NewStore(pg)
 	counters := metrics.New()
-	service := features.NewService(store, cache.New(rdb), counters)
-	router := api.NewRouter(service, counters)
+	chaosState := chaos.New()
+	redisCache := cache.New(rdb, chaosState)
+	service := features.NewService(store, redisCache, counters, chaosState)
+	router := api.NewRouter(service, redisCache, counters)
 	server := &http.Server{Addr: ":" + getenv("PORT", "8080"), Handler: router}
 
 	go func() {

@@ -22,6 +22,10 @@ async function runBurst() {
   const response = await fetch(`/loadgen/burst?rps=${burstRPS.value}&seconds=${burstSeconds.value}&keys=${burstKeys.value}`, { method: "POST" });
   notice.value = response.ok ? "Burst started" : "Burst parameters rejected";
 }
+async function chaos(path: string) {
+  const response = await fetch(path, { method: "POST" });
+  notice.value = response.ok ? "Chaos event applied" : "Chaos request failed";
+}
 async function fetchFeature() {
   const response = await fetch(`/features/${entityID.value}`);
   result.value = response.ok ? JSON.stringify(await response.json(), null, 2) : `HTTP ${response.status}`;
@@ -40,6 +44,14 @@ onBeforeUnmount(metrics.disconnect);
       <div><span class="label">Read path</span><div class="segmented"><button :class="{ selected: mode === 'naive' }" @click="setMode('naive')">Naive</button><button :class="{ selected: mode === 'hardened' }" @click="setMode('hardened')">Hardened</button></div></div>
       <div><span class="label">Built-in burst</span><div class="inputs"><input v-model.number="burstRPS" type="number" min="1" /><input v-model.number="burstSeconds" type="number" min="1" /><input v-model.number="burstKeys" type="number" min="1" /><button @click="runBurst">Run burst</button></div><small>RPS / seconds / keys</small></div>
       <span class="notice">{{ notice }}</span>
+    </section>
+    <section class="card chaos">
+      <div><span class="label">Failure injection</span><div class="inputs">
+        <button @click="chaos('/chaos/flush-cache')">Flush cache</button>
+        <button @click="chaos('/chaos/redis-down?seconds=15')">Redis down · 15s</button>
+        <button @click="chaos('/chaos/db-latency?ms=250')">DB latency · 250ms</button>
+        <button @click="chaos('/chaos/db-latency?ms=0')">Clear latency</button>
+      </div></div>
     </section>
     <section class="stats">
       <div class="stat card"><span>Hit rate</span><strong>{{ ((metrics.latest?.hit_rate ?? 0) * 100).toFixed(1) }}%</strong></div>
@@ -64,6 +76,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 3rem 2rem 5rem; } header { di
 .toolbar { display:flex; align-items:flex-end; gap:2rem; margin:3rem 0 1rem; flex-wrap:wrap; } .label { display:block; color:#a9b5bf; font-size:.8rem; margin-bottom:.5rem; } .segmented, .inputs { display:flex; gap:.4rem; }
 button, input { padding:.65rem .8rem; border-radius:7px; border:1px solid #40515e; background:#111820; color:inherit; font:inherit; } button { cursor:pointer; } button.selected, button:hover { background:#6de0b0; color:#102019; } small { color:#71808d; }
 .notice { color:#6de0b0; font-size:.85rem; } .stats, .charts { display:grid; grid-template-columns:repeat(4, 1fr); gap:1rem; margin:1rem 0; } .charts { grid-template-columns:repeat(2, 1fr); }
+.chaos { margin-bottom: 1rem; }
 .stat span { color:#91a0ad; font-size:.85rem; } .stat strong { display:block; margin-top:.5rem; font-size:1.6rem; } .read-test { margin-top:1rem; } pre { overflow:auto; color:#b7f4d8; }
 @media (max-width: 760px) { main { padding:2rem 1rem; } .stats, .charts { grid-template-columns:1fr; } header { display:block; } .connection { display:inline-block; } }
 </style>

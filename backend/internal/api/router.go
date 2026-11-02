@@ -8,13 +8,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/MTPeraya/stampede-shield/backend/internal/cache"
 	"github.com/MTPeraya/stampede-shield/backend/internal/features"
 	"github.com/MTPeraya/stampede-shield/backend/internal/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func NewRouter(service *features.Service, m *metrics.Metrics) http.Handler {
+func NewRouter(service *features.Service, redisCache *cache.Client, m *metrics.Metrics) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -24,6 +25,10 @@ func NewRouter(service *features.Service, m *metrics.Metrics) http.Handler {
 	r.Post("/mode", modeHandler(service))
 	r.Get("/metrics/stream", metricsStreamHandler(service, m))
 	r.Post("/loadgen/burst", burstHandler(service))
+	r.Post("/chaos/flush-cache", flushCacheHandler(redisCache))
+	r.Post("/chaos/redis-down", redisDownHandler(service))
+	r.Post("/chaos/db-latency", dbLatencyHandler(service))
+	r.Get("/chaos/state", chaosStateHandler(service))
 	r.Handle("/metrics", promhttp.Handler())
 	return r
 }
@@ -47,7 +52,15 @@ func metricsStreamHandler(service *features.Service, m *metrics.Metrics) http.Ha
 				return
 			case <-ticker.C:
 				_, _ = w.Write([]byte("data: "))
-				if err := encoder.Encode(m.Snapshot(string(service.Mode()))); err != nil {
+				snapshot := m.Snapshot(string(service.Mode()))
+				chaosState := service.ChaosState().Snapshot()
+				if chaosState["redis_down"] == true {
+					snapshot.ChaosEvents = append(snapshot.ChaosEvents, "redis-down")
+				}
+				if chaosState["db_latency_ms"].(int64) > 0 {
+					snapshot.ChaosEvents = append(snapshot.ChaosEvents, "db-latency")
+				}
+				if err := encoder.Encode(snapshot); err != nil {
 					return
 				}
 				_, _ = w.Write([]byte("\n"))
@@ -95,6 +108,49 @@ func modeHandler(service *features.Service) http.HandlerFunc {
 	}
 }
 
+func flushCacheHandler(redisCache *cache.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := redisCache.Flush(r.Context()); err != nil {
+			http.Error(w, "cache flush failed", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func redisDownHandler(service *features.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		seconds := queryInt(r, "seconds", 10)
+		if seconds < 1 || seconds > 3600 {
+			http.Error(w, "seconds must be between 1 and 3600", http.StatusBadRequest)
+			return
+		}
+		service.ChaosState().RedisDownFor(time.Duration(seconds) * time.Second)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func dbLatencyHandler(service *features.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ms := queryInt(r, "ms", 0)
+		if ms < 0 || ms > 30000 {
+			http.Error(w, "ms must be between 0 and 30000", http.StatusBadRequest)
+			return
+		}
+		service.ChaosState().SetDBLatency(time.Duration(ms) * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func chaosStateHandler(service *features.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		state := service.ChaosState().Snapshot()
+		state["mode"] = service.Mode()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(state)
+	}
+}
+
 func featureHandler(service *features.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -106,6 +162,10 @@ func featureHandler(service *features.Service) http.HandlerFunc {
 		}
 		feature, err := service.Get(r.Context(), entityID)
 		if err != nil {
+			if errors.Is(err, features.ErrLoadShed) {
+				http.Error(w, "database capacity exhausted", http.StatusTooManyRequests)
+				return
+			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				http.Error(w, "upstream timeout", http.StatusServiceUnavailable)
 				return

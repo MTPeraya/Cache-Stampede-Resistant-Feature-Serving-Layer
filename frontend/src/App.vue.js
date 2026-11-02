@@ -22,6 +22,10 @@ async function runBurst() {
     const response = await fetch(`/loadgen/burst?rps=${burstRPS.value}&seconds=${burstSeconds.value}&keys=${burstKeys.value}`, { method: "POST" });
     notice.value = response.ok ? "Burst started" : "Burst parameters rejected";
 }
+async function chaos(path) {
+    const response = await fetch(path, { method: "POST" });
+    notice.value = response.ok ? "Chaos event applied" : "Chaos request failed";
+}
 async function fetchFeature() {
     const response = await fetch(`/features/${entityID.value}`);
     result.value = response.ok ? JSON.stringify(await response.json(), null, 2) : `HTTP ${response.status}`;
@@ -101,6 +105,36 @@ __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.
     ...{ class: "notice" },
 });
 (__VLS_ctx.notice);
+__VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+    ...{ class: "card chaos" },
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+    ...{ class: "label" },
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+    ...{ class: "inputs" },
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+    ...{ onClick: (...[$event]) => {
+            __VLS_ctx.chaos('/chaos/flush-cache');
+        } },
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+    ...{ onClick: (...[$event]) => {
+            __VLS_ctx.chaos('/chaos/redis-down?seconds=15');
+        } },
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+    ...{ onClick: (...[$event]) => {
+            __VLS_ctx.chaos('/chaos/db-latency?ms=250');
+        } },
+});
+__VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+    ...{ onClick: (...[$event]) => {
+            __VLS_ctx.chaos('/chaos/db-latency?ms=0');
+        } },
+});
 __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
     ...{ class: "stats" },
 });
@@ -196,6 +230,10 @@ __VLS_asFunctionalElement(__VLS_intrinsicElements.pre, __VLS_intrinsicElements.p
 /** @type {__VLS_StyleScopedClasses['label']} */ ;
 /** @type {__VLS_StyleScopedClasses['inputs']} */ ;
 /** @type {__VLS_StyleScopedClasses['notice']} */ ;
+/** @type {__VLS_StyleScopedClasses['card']} */ ;
+/** @type {__VLS_StyleScopedClasses['chaos']} */ ;
+/** @type {__VLS_StyleScopedClasses['label']} */ ;
+/** @type {__VLS_StyleScopedClasses['inputs']} */ ;
 /** @type {__VLS_StyleScopedClasses['stats']} */ ;
 /** @type {__VLS_StyleScopedClasses['stat']} */ ;
 /** @type {__VLS_StyleScopedClasses['card']} */ ;
@@ -226,6 +264,7 @@ const __VLS_self = (await import('vue')).defineComponent({
             result: result,
             setMode: setMode,
             runBurst: runBurst,
+            chaos: chaos,
             fetchFeature: fetchFeature,
         };
     },

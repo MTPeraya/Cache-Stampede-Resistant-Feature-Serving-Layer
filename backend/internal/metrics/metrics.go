@@ -29,13 +29,15 @@ type Snapshot struct {
 }
 
 type Metrics struct {
-	Requests    prometheus.Counter
-	CacheHits   prometheus.Counter
-	CacheMisses prometheus.Counter
-	Coalesced   prometheus.Counter
-	StaleServes prometheus.Counter
-	DBQueries   prometheus.Counter
-	Latency     prometheus.Histogram
+	Requests     prometheus.Counter
+	CacheHits    prometheus.Counter
+	CacheMisses  prometheus.Counter
+	Coalesced    prometheus.Counter
+	StaleServes  prometheus.Counter
+	DBQueries    prometheus.Counter
+	ShedRequests prometheus.Counter
+	InFlight     prometheus.Gauge
+	Latency      prometheus.Histogram
 
 	requests    atomic.Uint64
 	cacheHits   atomic.Uint64
@@ -56,15 +58,17 @@ func New() *Metrics {
 
 func NewWithRegisterer(registerer prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		Requests:    prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_requests_total", Help: "Feature requests."}),
-		CacheHits:   prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_cache_hits_total", Help: "Cache hits."}),
-		CacheMisses: prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_cache_misses_total", Help: "Cache misses."}),
-		Coalesced:   prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_coalesced_requests_total", Help: "Requests sharing an in-flight database read."}),
-		StaleServes: prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_stale_serves_total", Help: "Requests served stale data."}),
-		DBQueries:   prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_db_queries_total", Help: "Database queries."}),
-		Latency:     prometheus.NewHistogram(prometheus.HistogramOpts{Name: "stampede_request_duration_seconds", Help: "Request latency.", Buckets: prometheus.DefBuckets}),
+		Requests:     prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_requests_total", Help: "Feature requests."}),
+		CacheHits:    prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_cache_hits_total", Help: "Cache hits."}),
+		CacheMisses:  prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_cache_misses_total", Help: "Cache misses."}),
+		Coalesced:    prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_coalesced_requests_total", Help: "Requests sharing an in-flight database read."}),
+		StaleServes:  prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_stale_serves_total", Help: "Requests served stale data."}),
+		DBQueries:    prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_db_queries_total", Help: "Database queries."}),
+		ShedRequests: prometheus.NewCounter(prometheus.CounterOpts{Name: "stampede_shed_requests_total", Help: "Requests rejected by database load shedding."}),
+		InFlight:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "stampede_in_flight_db_queries", Help: "Database queries currently in flight."}),
+		Latency:      prometheus.NewHistogram(prometheus.HistogramOpts{Name: "stampede_request_duration_seconds", Help: "Request latency.", Buckets: prometheus.DefBuckets}),
 	}
-	for _, collector := range []prometheus.Collector{m.Requests, m.CacheHits, m.CacheMisses, m.Coalesced, m.StaleServes, m.DBQueries, m.Latency} {
+	for _, collector := range []prometheus.Collector{m.Requests, m.CacheHits, m.CacheMisses, m.Coalesced, m.StaleServes, m.DBQueries, m.ShedRequests, m.InFlight, m.Latency} {
 		if err := registerer.Register(collector); err != nil {
 			panic(err)
 		}
@@ -82,13 +86,17 @@ func (m *Metrics) BeginDBQuery() {
 	m.DBQueries.Inc()
 	m.dbQueries.Add(1)
 	m.inFlightDB.Add(1)
+	m.InFlight.Inc()
 	m.mu.Lock()
 	m.dbQueryAt = append(m.dbQueryAt, time.Now())
 	m.mu.Unlock()
 }
 
-func (m *Metrics) EndDBQuery() { m.inFlightDB.Add(-1) }
-func (m *Metrics) IncShed()    { m.shed.Add(1) }
+func (m *Metrics) EndDBQuery() {
+	m.inFlightDB.Add(-1)
+	m.InFlight.Dec()
+}
+func (m *Metrics) IncShed() { m.ShedRequests.Inc(); m.shed.Add(1) }
 
 func (m *Metrics) Observe(start time.Time) {
 	seconds := time.Since(start).Seconds()

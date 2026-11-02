@@ -75,6 +75,19 @@ npm install
 npm run build
 ```
 
+## Phase 4 resilience and chaos controls
+
+The API now supports controlled failure injection:
+
+```sh
+curl -X POST http://localhost:8080/chaos/flush-cache
+curl -X POST 'http://localhost:8080/chaos/redis-down?seconds=15'
+curl -X POST 'http://localhost:8080/chaos/db-latency?ms=250'
+curl http://localhost:8080/chaos/state
+```
+
+Database reads are capped at 100 in-flight operations. Excess requests receive `429` and increment `stampede_shed_requests_total`. Hardened mode serves stale cache entries immediately while refreshes fail or the database is slow; naive mode exposes the baseline failure behavior.
+
 ## Demo
 
 `[Demo GIF placeholder]`

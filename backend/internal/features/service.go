@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MTPeraya/stampede-shield/backend/internal/cache"
+	"github.com/MTPeraya/stampede-shield/backend/internal/chaos"
 	"github.com/MTPeraya/stampede-shield/backend/internal/metrics"
 	"golang.org/x/sync/singleflight"
 )
@@ -38,10 +39,16 @@ type Service struct {
 	mu      sync.RWMutex
 	randMu  sync.Mutex
 	rand    *rand.Rand
+	chaos   *chaos.State
+	dbSlots chan struct{}
 }
 
-func NewService(store StoreReader, cacheClient CacheReader, m *metrics.Metrics) *Service {
-	return &Service{store: store, cache: cacheClient, metrics: m, mode: ModeNaive, rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
+func NewService(store StoreReader, cacheClient CacheReader, m *metrics.Metrics, states ...*chaos.State) *Service {
+	state := chaos.New()
+	if len(states) > 0 && states[0] != nil {
+		state = states[0]
+	}
+	return &Service{store: store, cache: cacheClient, metrics: m, mode: ModeNaive, rand: rand.New(rand.NewSource(time.Now().UnixNano())), chaos: state, dbSlots: make(chan struct{}, 100)}
 }
 
 func (s *Service) SetMode(mode Mode) error {
@@ -112,8 +119,24 @@ func (s *Service) refresh(key string, entityID int64) {
 }
 
 func (s *Service) queryAndCache(ctx context.Context, key string, entityID int64) (Feature, error) {
+	select {
+	case s.dbSlots <- struct{}{}:
+		defer func() { <-s.dbSlots }()
+	default:
+		s.metrics.IncShed()
+		return Feature{}, ErrLoadShed
+	}
 	s.metrics.BeginDBQuery()
 	defer s.metrics.EndDBQuery()
+	if delay := s.chaos.DBLatency(); delay > 0 {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Feature{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	feature, err := s.store.Get(ctx, entityID)
 	if err != nil {
 		return Feature{}, err
@@ -122,10 +145,15 @@ func (s *Service) queryAndCache(ctx context.Context, key string, entityID int64)
 	if err != nil {
 		return Feature{}, fmt.Errorf("encode feature: %w", err)
 	}
+
 	softTTL, hardTTL := s.ttls()
 	_ = s.cache.Set(ctx, key, cache.Entry{Data: value, SoftExpires: time.Now().Add(softTTL)}, softTTL, hardTTL)
 	return feature, nil
 }
+
+var ErrLoadShed = fmt.Errorf("database load shed")
+
+func (s *Service) ChaosState() *chaos.State { return s.chaos }
 
 func (s *Service) ttls() (time.Duration, time.Duration) {
 	s.randMu.Lock()
